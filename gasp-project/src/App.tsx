@@ -2,277 +2,418 @@ import "./App.css";
 import { useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import { gsap } from "gsap";
-import "./index.css"; // Asegúrate de importar Tailwind aquí
 
-// Componente de dígito individual del odómetro
-// Este componente representa UN SOLO dígito (0-9) y se anima cuando cambia
-function OdometerDigit({ value }: { value: number; position: number }) {
-  // Referencia al elemento DOM que vamos a animar
+// ============================================================================
+// CONSTANTES Y CONFIGURACIÓN
+// ============================================================================
+const ANIMATION_CONFIG = {
+  ROTATION_DEGREES: 90,
+  MOVEMENT_OFFSET: 10,
+  DURATION: 0.3,
+  EASING: {
+    IN_OUT: "power2.inOut",
+    OUT: "power2.out",
+    ELASTIC: "elastic.out(1, 0.3)",
+    BACK: "back.out(1.7)",
+  },
+} as const;
+
+const COUNTER_CONFIG = {
+  MIN_VALUE: 0,
+  MAX_VALUE: 9999,
+  DIGIT_COUNT: 4,
+} as const;
+
+const BUTTON_ANIMATION_CONFIG = {
+  SCALE: {
+    PRESSED: 0.95,
+    EXPANDED: 1.05,
+    HOVER: 1.1,
+    NORMAL: 1,
+  },
+  DURATION: {
+    PRESS: 0.1,
+    EXPAND: 0.15,
+    RETURN: 0.2,
+    HOVER: 0.3,
+  },
+  EASING: {
+    OUT: "power2.out",
+    BACK: "back.out(1.7)",
+    ELASTIC: "elastic.out(1, 0.3)",
+  },
+} as const;
+
+// ============================================================================
+// TIPOS
+// ============================================================================
+interface OdometerDigitProps {
+  value: number;
+}
+
+// ============================================================================
+// HOOKS PERSONALIZADOS
+// ============================================================================
+
+/**
+ * Hook para manejar la animación de un dígito del odómetro
+ * Principio: Single Responsibility - Solo maneja la animación del dígito
+ */
+function useDigitAnimation(value: number) {
   const digitRef = useRef<HTMLDivElement>(null);
-
-  // Estado local que guarda el valor actual mostrado
   const [currentValue, setCurrentValue] = useState(value);
 
-  // Hook de GSAP que se ejecuta cuando 'value' cambia
-  useGSAP(() => {
-    // Solo animar si el nuevo valor es diferente al actual
-    if (value !== currentValue) {
-      // Determinar dirección de la animación:
-      // Si el nuevo valor es mayor: rotar hacia arriba (dirección -1)
-      // Si el nuevo valor es menor: rotar hacia abajo (dirección 1)
-      const direction = value > currentValue ? -1 : 1;
+  const animateDigitChange = (newValue: number, oldValue: number) => {
+    if (!digitRef.current || newValue === oldValue) return;
 
-      // PRIMERA PARTE: Rotar el dígito actual hacia afuera
-      gsap.fromTo(
-        digitRef.current,
-        {
-          rotationX: 0, // Posición inicial (sin rotación)
-          y: 0, // Posición inicial (sin desplazamiento)
+    const direction = newValue > oldValue ? -1 : 1;
+    const { ROTATION_DEGREES, MOVEMENT_OFFSET, DURATION, EASING } =
+      ANIMATION_CONFIG;
+
+    // Fase 1: Rotar hacia afuera
+    gsap.fromTo(
+      digitRef.current,
+      { rotationX: 0, y: 0 },
+      {
+        rotationX: direction * ROTATION_DEGREES,
+        y: direction * MOVEMENT_OFFSET,
+        duration: DURATION,
+        ease: EASING.IN_OUT,
+        onComplete: () => {
+          setCurrentValue(newValue);
+
+          // Fase 2: Rotar hacia adentro
+          gsap.fromTo(
+            digitRef.current,
+            {
+              rotationX: -direction * ROTATION_DEGREES,
+              y: -direction * MOVEMENT_OFFSET,
+            },
+            {
+              rotationX: 0,
+              y: 0,
+              duration: DURATION,
+              ease: EASING.OUT,
+            }
+          );
         },
-        {
-          rotationX: direction * 90, // Rotar 90 grados
-          y: direction * 10, // Mover ligeramente
-          duration: 0.3, // Duración de la animación
-          ease: "power2.inOut", // Tipo de easing
+      }
+    );
+  };
 
-          // Cuando termina la primera animación:
-          onComplete: () => {
-            // Cambiar el número mostrado
-            setCurrentValue(value);
-
-            // SEGUNDA PARTE: Traer el nuevo dígito desde el otro lado
-            gsap.fromTo(
-              digitRef.current,
-              {
-                rotationX: -direction * 90, // Empezar desde el lado opuesto
-                y: -direction * 10,
-              },
-              {
-                rotationX: 0, // Volver a la posición normal
-                y: 0,
-                duration: 0.3,
-                ease: "power2.out",
-              }
-            );
-          },
-        }
-      );
+  useGSAP(() => {
+    if (value !== currentValue) {
+      animateDigitChange(value, currentValue);
     }
-  }, [value]); // Se ejecuta cada vez que 'value' cambia
+  }, [value, currentValue]);
+
+  return { digitRef, currentValue };
+}
+
+/**
+ * Hook para manejar las animaciones de botones
+ * Principio: Single Responsibility - Solo maneja animaciones de botones
+ */
+function useButtonAnimations() {
+  const createButtonAnimation = (
+    buttonRef: React.RefObject<HTMLButtonElement>
+  ) => {
+    if (!buttonRef.current) return;
+
+    const { SCALE, DURATION } = BUTTON_ANIMATION_CONFIG;
+
+    gsap
+      .timeline()
+      .to(buttonRef.current, {
+        scale: SCALE.PRESSED,
+        duration: DURATION.PRESS,
+        ease: BUTTON_ANIMATION_CONFIG.EASING.OUT,
+      })
+      .to(buttonRef.current, {
+        scale: SCALE.EXPANDED,
+        duration: DURATION.EXPAND,
+        ease: BUTTON_ANIMATION_CONFIG.EASING.BACK,
+      })
+      .to(buttonRef.current, {
+        scale: SCALE.NORMAL,
+        duration: DURATION.RETURN,
+        ease: BUTTON_ANIMATION_CONFIG.EASING.ELASTIC,
+      });
+  };
+
+  const setupHoverAnimation = (
+    buttonRef: React.RefObject<HTMLButtonElement>,
+    shadowColor: string
+  ) => {
+    if (!buttonRef.current) return () => {};
+
+    const btn = buttonRef.current;
+    const { SCALE, DURATION } = BUTTON_ANIMATION_CONFIG;
+
+    const handleMouseEnter = () => {
+      gsap.to(btn, {
+        scale: SCALE.HOVER,
+        boxShadow: `0 10px 25px ${shadowColor}`,
+        duration: DURATION.HOVER,
+        ease: "power2.out",
+      });
+    };
+
+    const handleMouseLeave = () => {
+      gsap.to(btn, {
+        scale: SCALE.NORMAL,
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+        duration: DURATION.HOVER,
+        ease: "power2.out",
+      });
+    };
+
+    btn.addEventListener("mouseenter", handleMouseEnter);
+    btn.addEventListener("mouseleave", handleMouseLeave);
+
+    // Retornar función de cleanup
+    return () => {
+      btn.removeEventListener("mouseenter", handleMouseEnter);
+      btn.removeEventListener("mouseleave", handleMouseLeave);
+    };
+  };
+
+  return { createButtonAnimation, setupHoverAnimation };
+}
+
+/**
+ * Hook para manejar el estado del contador
+ * Principio: Single Responsibility - Solo maneja la lógica del contador
+ */
+function useCounter(initialValue: number = 0) {
+  const [count, setCount] = useState(initialValue);
+
+  const increment = () => {
+    setCount((prev) => Math.min(COUNTER_CONFIG.MAX_VALUE, prev + 1));
+  };
+
+  const decrement = () => {
+    setCount((prev) => Math.max(COUNTER_CONFIG.MIN_VALUE, prev - 1));
+  };
+
+  const getDigits = (num: number): number[] => {
+    return num
+      .toString()
+      .padStart(COUNTER_CONFIG.DIGIT_COUNT, "0")
+      .split("")
+      .map(Number);
+  };
+
+  return {
+    count,
+    digits: getDigits(count),
+    increment,
+    decrement,
+  };
+}
+
+// ============================================================================
+// COMPONENTES
+// ============================================================================
+
+/**
+ * Componente de dígito individual del odómetro
+ * Principio: Single Responsibility - Solo renderiza y anima un dígito
+ */
+function OdometerDigit({ value }: OdometerDigitProps) {
+  const { digitRef, currentValue } = useDigitAnimation(value);
 
   return (
-    // Contenedor del dígito con estilo de pantalla digital
     <div className="relative w-16 h-20 bg-black rounded-lg shadow-lg overflow-hidden border-2 border-gray-700">
-      {/* El dígito en sí */}
       <div
-        ref={digitRef} // Referencia para GSAP
+        ref={digitRef}
         className="absolute inset-0 flex items-center justify-center text-4xl font-mono font-bold text-green-400"
-        style={{ perspective: "1000px" }} // Perspectiva 3D
+        style={{ perspective: "1000px" }}
       >
         {currentValue}
       </div>
 
-      {/* Efectos visuales para simular una pantalla real */}
-      {/* Brillo en la parte superior */}
-      <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/10 to-transparent pointer-events-none"></div>
-
-      {/* Línea divisoria en el medio */}
-      <div className="absolute top-1/2 left-0 w-full h-px bg-gray-600"></div>
+      {/* Efectos visuales */}
+      <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/10 to-transparent pointer-events-none" />
+      <div className="absolute top-1/2 left-0 w-full h-px bg-gray-600" />
     </div>
   );
 }
 
-// Componente principal - Contador Odómetro Simplificado para Aprendizaje
-export default function App() {
-  // Estado principal: mantiene el valor actual del contador (0-9999)
-  const [count, setCount] = useState(0);
+/**
+ * Componente de botón animado
+ * Principio: Single Responsibility - Solo maneja un botón con sus animaciones
+ */
+interface AnimatedButtonProps {
+  onClick: () => void;
+  variant: "increment" | "decrement";
+  children: React.ReactNode;
+}
 
-  // Referencias para animar los botones
-  const decrementBtnRef = useRef<HTMLButtonElement>(null);
-  const incrementBtnRef = useRef<HTMLButtonElement>(null);
+function AnimatedButton({ onClick, variant, children }: AnimatedButtonProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const { createButtonAnimation, setupHoverAnimation } = useButtonAnimations();
 
-  // Función que convierte un número en un array de 4 dígitos
-  // Ejemplo: 42 → [0, 0, 4, 2]
-  // Ejemplo: 1234 → [1, 2, 3, 4]
-  const getDigits = (num: number): number[] => {
-    // 1. Convertir número a string
-    // 2. Rellenar con ceros a la izquierda hasta tener 4 caracteres
-    // 3. Dividir en caracteres individuales
-    // 4. Convertir cada carácter de vuelta a número
-    const str = Math.abs(num).toString().padStart(4, "0");
-    return str.split("").map((d) => parseInt(d));
-  };
-
-  // Convertimos el número actual en array de dígitos para renderizar
-  const digits = getDigits(count);
-
-  // Función para animar un botón cuando se hace clic
-  const animateButton = (buttonRef: React.RefObject<HTMLButtonElement>) => {
+  const handleClick = () => {
     if (buttonRef.current) {
-      // Animación de "pulso" con escala y rotación
-      gsap
-        .timeline()
-        .to(buttonRef.current, {
-          scale: 0.95,
-          /* rotation: 2, */
-          duration: 0.1,
-          ease: "power2.out",
-        })
-        .to(buttonRef.current, {
-          scale: 1.05,
-          /* rotation: -1, */
-          duration: 0.15,
-          ease: "back.out(1.7)",
-        })
-        .to(buttonRef.current, {
-          scale: 1,
-          rotation: 0,
-          duration: 0.2,
-          ease: "elastic.out(1, 0.3)",
-        });
+      createButtonAnimation(buttonRef as React.RefObject<HTMLButtonElement>);
     }
+    onClick();
   };
 
-  // Función que maneja los clics de los botones
-  const handleClick = (action: "inc" | "dec") => {
-    // Animar el botón correspondiente
-    if (action === "inc") {
-      if (incrementBtnRef.current) {
-        animateButton(incrementBtnRef as React.RefObject<HTMLButtonElement>);
-      }
-      // Incrementar el contador (máximo 9999)
-      setCount((prev) => Math.min(9999, prev + 1));
-    } else {
-      animateButton(decrementBtnRef as React.RefObject<HTMLButtonElement>);
-      // Decrementar el contador (mínimo 0)
-      setCount((prev) => Math.max(0, prev - 1));
-    }
+  const buttonConfig = {
+    increment: {
+      className:
+        "px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-colors",
+      shadowColor: "rgba(34, 197, 94, 0.4)",
+    },
+    decrement: {
+      className:
+        "px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors",
+      shadowColor: "rgba(239, 68, 68, 0.4)",
+    },
   };
 
-  // Configurar animaciones de hover para los botones
+  const config = buttonConfig[variant];
+
   useGSAP(() => {
-    // Animación hover para botón decrementar
-    if (decrementBtnRef.current) {
-      const btn = decrementBtnRef.current;
-
-      btn.addEventListener("mouseenter", () => {
-        gsap.to(btn, {
-          scale: 1.1,
-          boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
-          duration: 0.3,
-          ease: "power2.out",
-        });
-      });
-
-      btn.addEventListener("mouseleave", () => {
-        gsap.to(btn, {
-          scale: 1,
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-          duration: 0.3,
-          ease: "power2.out",
-        });
-      });
+    if (buttonRef.current) {
+      const cleanup = setupHoverAnimation(
+        buttonRef as React.RefObject<HTMLButtonElement>,
+        config.shadowColor
+      );
+      return cleanup;
     }
-
-    // Animación hover para botón incrementar
-    if (incrementBtnRef.current) {
-      const btn = incrementBtnRef.current;
-
-      btn.addEventListener("mouseenter", () => {
-        gsap.to(btn, {
-          scale: 1.1,
-          boxShadow: "0 10px 25px rgba(34, 197, 94, 0.4)",
-          duration: 0.3,
-          ease: "power2.out",
-        });
-      });
-
-      btn.addEventListener("mouseleave", () => {
-        gsap.to(btn, {
-          scale: 1,
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-          duration: 0.3,
-          ease: "power2.out",
-        });
-      });
-    }
-  }, []);
+    return () => {};
+  }, [config.shadowColor]);
 
   return (
-    // Contenedor principal con fondo oscuro y centrado
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white font-sans p-6">
-      {/* TÍTULO PRINCIPAL */}
-      <h1 className="text-4xl font-bold mb-4 text-green-400">
-        Contador Odómetro - Versión Simple
-      </h1>
+    <button ref={buttonRef} onClick={handleClick} className={config.className}>
+      {children}
+    </button>
+  );
+}
 
-      {/* DESCRIPCIÓN EXPLICATIVA */}
-      <p className="text-gray-400 mb-8 text-center max-w-md">
-        Cada dígito es un componente independiente que se anima cuando cambia su
-        valor. Observa cómo solo los dígitos que cambian se animan.
-      </p>
+/**
+ * Componente del display del odómetro
+ * Principio: Single Responsibility - Solo maneja la visualización de dígitos
+ */
+interface OdometerDisplayProps {
+  digits: number[];
+}
 
-      {/* DISPLAY DEL ODÓMETRO - Aquí se muestran los 4 dígitos lado a lado */}
-      <div className="flex gap-3 mb-8 p-4 bg-gray-800 rounded-xl">
-        {/* Renderizar cada dígito como un componente separado */}
-        {digits.map((digit, index) => (
-          <OdometerDigit
-            key={index} // Clave única para React
-            value={digit} // El valor del dígito (0-9)
-            position={index} // La posición del dígito (0=miles, 1=centenas, 2=decenas, 3=unidades)
-          />
-        ))}
-      </div>
+function OdometerDisplay({ digits }: OdometerDisplayProps) {
+  return (
+    <div className="flex gap-3 mb-8 p-4 bg-gray-800 rounded-xl">
+      {digits.map((digit, index) => (
+        <OdometerDigit key={index} value={digit} />
+      ))}
+    </div>
+  );
+}
 
-      {/* CONTROLES - Solo dos botones simples para incrementar/decrementar */}
-      <div className="flex gap-4 mb-6">
-        {/* Botón para decrementar (-1) */}
-        <button
-          ref={decrementBtnRef}
-          onClick={() => handleClick("dec")}
-          className="px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors"
-        >
-          - Decrementar
-        </button>
+/**
+ * Componente de controles
+ * Principio: Single Responsibility - Solo maneja los botones de control
+ */
+interface ControlsProps {
+  onIncrement: () => void;
+  onDecrement: () => void;
+}
 
-        {/* Botón para incrementar (+1) */}
-        <button
-          ref={incrementBtnRef}
-          onClick={() => handleClick("inc")}
-          className="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-colors"
-        >
-          + Incrementar
-        </button>
-      </div>
+function Controls({ onIncrement, onDecrement }: ControlsProps) {
+  return (
+    <div className="flex gap-4 mb-6">
+      <AnimatedButton onClick={onDecrement} variant="decrement">
+        - Decrementar
+      </AnimatedButton>
+      <AnimatedButton onClick={onIncrement} variant="increment">
+        + Incrementar
+      </AnimatedButton>
+    </div>
+  );
+}
 
-      {/* INFORMACIÓN DEL VALOR ACTUAL */}
-      <div className="text-center">
-        <p className="text-gray-400 text-sm">Valor actual:</p>
-        <p className="text-3xl font-mono text-green-400">{count}</p>
-      </div>
+/**
+ * Componente de información del contador
+ * Principio: Single Responsibility - Solo muestra información del estado actual
+ */
+interface CounterInfoProps {
+  count: number;
+}
 
-      {/* SECCIÓN EDUCATIVA - Explicación de cómo funciona el código */}
-      <div className="mt-8 max-w-2xl text-center text-gray-300 text-sm">
-        <h3 className="text-lg font-bold mb-2 text-white">¿Cómo funciona?</h3>
+function CounterInfo({ count }: CounterInfoProps) {
+  return (
+    <div className="text-center">
+      <p className="text-gray-400 text-sm">Valor actual:</p>
+      <p className="text-3xl font-mono text-green-400">{count}</p>
+    </div>
+  );
+}
 
-        {/* Paso 1: División en dígitos */}
-        <p className="mb-2">
+/**
+ * Componente de documentación educativa
+ * Principio: Single Responsibility - Solo maneja la documentación
+ */
+function EducationalSection() {
+  return (
+    <div className="mt-8 max-w-2xl text-center text-gray-300 text-sm">
+      <h3 className="text-lg font-bold mb-2 text-white">¿Cómo funciona?</h3>
+
+      <div className="space-y-2">
+        <p>
           1. El número se divide en dígitos individuales usando{" "}
           <code className="bg-gray-700 px-1 rounded">getDigits()</code>
         </p>
 
-        {/* Paso 2: Componentes independientes */}
-        <p className="mb-2">
+        <p>
           2. Cada dígito es un componente{" "}
           <code className="bg-gray-700 px-1 rounded">OdometerDigit</code>{" "}
           independiente
         </p>
 
-        {/* Paso 3: Animación con GSAP */}
         <p>
           3. Cuando un dígito cambia, GSAP anima solo ese dígito con rotación 3D
         </p>
+
+        <p className="mt-4 text-xs text-gray-400">
+          <strong>Principios aplicados:</strong> SOLID, Clean Code, Separation
+          of Concerns
+        </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Componente principal del odómetro
+ * Principio: Open/Closed - Abierto para extensión, cerrado para modificación
+ * Principio: Dependency Inversion - Depende de abstracciones (hooks), no de implementaciones
+ */
+export default function App() {
+  const { count, digits, increment, decrement } = useCounter(0);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white font-sans p-6">
+      <header className="text-center mb-8">
+        <h1 className="text-4xl font-bold mb-4 text-green-400">
+          Contador Odómetro - Clean Code
+        </h1>
+        <p className="text-gray-400 max-w-md">
+          Implementación siguiendo principios SOLID y Clean Code. Cada
+          componente tiene una responsabilidad única.
+        </p>
+      </header>
+
+      <main className="flex flex-col items-center">
+        <OdometerDisplay digits={digits} />
+        <Controls onIncrement={increment} onDecrement={decrement} />
+        <CounterInfo count={count} />
+      </main>
+
+      <footer>
+        <EducationalSection />
+      </footer>
     </div>
   );
 }
